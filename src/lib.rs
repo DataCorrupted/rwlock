@@ -62,6 +62,7 @@ impl<T> RwLock<T> {
 	// (We declare this return type to be `Result` to be compatible with `std::sync::RwLock`)
 	pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
 		let mut state = self.state.lock().unwrap();
+//		println!("a_r: {} a_w: {} w_r: {} w_r:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		state.wtng_reader += 1;
 		match self.pref {
 			Preference::Reader 	=> {
@@ -70,13 +71,14 @@ impl<T> RwLock<T> {
 				}
 			},
 			Preference::Writer 	=> {
-				while state.actv_writer + state.wtng_writer > 0{
+				while (state.actv_writer + state.wtng_writer) > 0{
 					state = self.reader.wait(state).unwrap();
 				}				
 			},
 		}
-		state.actv_reader += 1;
 		state.wtng_reader -= 1;
+		state.actv_reader += 1;
+//		println!("a_r: {} a_w: {} w_r: {} w_r:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		Ok(RwLockReadGuard{ lock: &self })	
 	}
 
@@ -88,25 +90,44 @@ impl<T> RwLock<T> {
 	// Always returns Ok(_).
 	pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
 		let mut state = self.state.lock().unwrap();
+//		println!("a_r: {} a_w: {} w_r: {} w_r:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		state.wtng_writer += 1;
 		let vec = unsafe{ &mut *self.writer.get() };
-		let len = vec.len();
 		vec.push(Condvar::new());
+		
 		match self.pref{
 			Preference::Reader 	=> {
-				while state.actv_writer + state.actv_reader + state.wtng_reader > 0{
-					state = vec[len].wait(state).unwrap();
+				while (state.actv_writer + state.actv_reader + state.wtng_reader) > 0{
+					state = vec[vec.len()-1].wait(state).unwrap();
 				}
 			},
 			Preference::Writer 	=> {
-				while state.actv_writer + state.actv_reader > 0{
-					state = vec[len].wait(state).unwrap();
+				while (state.actv_writer + state.actv_reader) > 0{
+					state = vec[vec.len()-1].wait(state).unwrap();
 				}
 			},
 		}
-		state.actv_writer += 1;
 		state.wtng_writer -= 1;
+		state.actv_writer += 1;
+		match self.order{
+			Order::Fifo	=> { vec.remove(0); },
+			Order::Lifo	=> { vec.pop(); },
+		}
+//		println!("a_r: {} a_w: {} w_r: {} w_r:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		Ok(RwLockWriteGuard{ lock: &self })
+	}
+
+	fn pick_writer(&self) {
+//		let _ = self.state.lock().unwrap();
+		let vec = unsafe{ &mut *self.writer.get() };
+		match self.order{
+			Order::Fifo	=>{
+				vec[0].notify_all();
+			},
+			Order::Lifo	=>{
+				vec[vec.len()-1].notify_all();
+			},
+		}
 	}
 }
 
@@ -129,17 +150,7 @@ impl<'a, T> Drop for RwLockReadGuard<'a, T> {
 		let mut state = self.lock.state.lock().unwrap();
 		state.actv_reader -= 1;
 		if state.wtng_writer > 0 {
-			let vec = unsafe{ &mut *self.lock.writer.get() };
-			match &self.lock.order{
-				&Order::Fifo	=>{
-					vec[0].notify_all();
-					vec.remove(0);
-				},
-				&Order::Lifo	=>{
-					let temp = vec.pop().unwrap();
-					temp.notify_all();
-				},
-			}
+			self.lock.pick_writer();
 		}
 	}
 }
@@ -154,32 +165,12 @@ impl<'a, T> Drop for RwLockWriteGuard<'a, T> {
 				if state.wtng_reader > 0 {
 					self.lock.reader.notify_all();
 				} else if state.wtng_writer > 0 {
-					let vec = unsafe{ &mut *self.lock.writer.get() };
-					match self.lock.order{
-						Order::Fifo	=>{
-							vec[0].notify_all();
-							vec.remove(0);
-						},
-						Order::Lifo	=>{
-							let temp = vec.pop().unwrap();
-							temp.notify_all();
-						},
-					}
+					self.lock.pick_writer();
 				}
 			},
 			Preference::Writer 	=>{
 				if state.wtng_writer > 0 {
-					let vec = unsafe{ &mut *self.lock.writer.get() };
-					match self.lock.order{
-						Order::Fifo	=>{
-							vec[0].notify_all();
-							vec.remove(0);
-						},
-						Order::Lifo	=>{
-							let temp = vec.pop().unwrap();
-							temp.notify_all();
-						},
-					}
+					self.lock.pick_writer();
 				} else if state.wtng_reader > 0 {
 					self.lock.reader.notify_all();
 				}
@@ -208,16 +199,3 @@ impl<'a, T> DerefMut for RwLockWriteGuard<'a, T> {
 		unsafe{ &mut *self.lock.data.get() }
 	}
 }
-
-/*
-#[test]
-fn test_lock(){
-	let important = 12;
-	let imp_lock = RwLock::new(important, Preference::Reader, Order::Fifo);
-{	let mut lock1 = imp_lock.write().unwrap();
-	*lock1 += 1;	}
-	let lock2 = imp_lock.read().unwrap();
-	let lock3 = imp_lock.read().unwrap();
-	assert_eq!(13, *lock2);
-	assert_eq!(13, *lock3);
-}*/
