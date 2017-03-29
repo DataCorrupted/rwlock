@@ -64,18 +64,18 @@ impl<T> RwLock<T> {
 		let mut state = self.state.lock().unwrap();
 		state.wtng_reader += 1;
 		match self.pref {
-			Preference::Writer 	=> {
-				while state.actv_writer + state.wtng_writer > 0{
-					state = self.reader.wait(state).unwrap();
-				}				
-			} 
 			Preference::Reader 	=> {
 				while state.actv_writer > 0 {
 					state = self.reader.wait(state).unwrap();
 				}
-			}
+			},
+			Preference::Writer 	=> {
+				while state.actv_writer + state.wtng_writer > 0{
+					state = self.reader.wait(state).unwrap();
+				}				
+			},
 		}
-		state.actv_writer += 1;
+		state.actv_reader += 1;
 		state.wtng_reader -= 1;
 		Ok(RwLockReadGuard{ lock: &self })	
 	}
@@ -93,13 +93,13 @@ impl<T> RwLock<T> {
 		let len = vec.len();
 		vec.push(Condvar::new());
 		match self.pref{
-			Preference::Writer 	=> {
-				while state.actv_writer + state.actv_reader > 0{
+			Preference::Reader 	=> {
+				while state.actv_writer + state.actv_reader + state.wtng_reader > 0{
 					state = vec[len].wait(state).unwrap();
 				}
 			},
-			Preference::Reader 	=> {
-				while state.actv_writer + state.actv_reader + state.wtng_reader > 0{
+			Preference::Writer 	=> {
+				while state.actv_writer + state.actv_reader > 0{
 					state = vec[len].wait(state).unwrap();
 				}
 			},
@@ -109,6 +109,7 @@ impl<T> RwLock<T> {
 		Ok(RwLockWriteGuard{ lock: &self })
 	}
 }
+
 // Declares that it is safe to send and reference `RwLock` between threads safely
 unsafe impl<T: Send + Sync> Send for RwLock<T> {}
 unsafe impl<T: Send + Sync> Sync for RwLock<T> {}
@@ -142,6 +143,7 @@ impl<'a, T> Drop for RwLockReadGuard<'a, T> {
 		}
 	}
 }
+
 // Releases the write lock
 impl<'a, T> Drop for RwLockWriteGuard<'a, T> {
 	fn drop(&mut self){
@@ -212,7 +214,10 @@ impl<'a, T> DerefMut for RwLockWriteGuard<'a, T> {
 fn test_lock(){
 	let important = 12;
 	let imp_lock = RwLock::new(important, Preference::Reader, Order::Fifo);
-	let mut lock1 = imp_lock.write().unwrap();
-	*lock1 += 1;
-	assert_eq!(13, *lock1);
+{	let mut lock1 = imp_lock.write().unwrap();
+	*lock1 += 1;	}
+	let lock2 = imp_lock.read().unwrap();
+	let lock3 = imp_lock.read().unwrap();
+	assert_eq!(13, *lock2);
+	assert_eq!(13, *lock3);
 }*/
