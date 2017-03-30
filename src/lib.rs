@@ -16,7 +16,6 @@ pub struct RwLock<T> {
 	state: Mutex<State>,
 	reader: Condvar,
 	writer: UnsafeCell<Vec<Condvar>>,
-//	writer_log: UnsafeCell<Vec<usize>>,
 }
 
 #[derive(PartialEq)]
@@ -54,7 +53,6 @@ impl<T> RwLock<T> {
 			}),
 			reader: Condvar::new(),
 			writer: UnsafeCell::new(Vec::new()), 
-//			writer_log: UnsafeCell::new(Vec::new()),
 		}
 	}
 
@@ -62,12 +60,9 @@ impl<T> RwLock<T> {
 	// 
 	// Always returns Ok(_).
 	// (We declare this return type to be `Result` to be compatible with `std::sync::RwLock`)
-	//pub fn read(&self, cnt: &usize) -> Result<RwLockReadGuard<T>, ()> {
 	pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
 		let mut state = self.state.lock().unwrap();
 		state.wtng_reader += 1;
-		//println!("\tIncoming Thread: {:?}", cnt);
-		//println!("\t\t\ta_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		match self.pref {
 			Preference::Reader 	=> {
 				while state.actv_writer > 0 {
@@ -82,7 +77,6 @@ impl<T> RwLock<T> {
 		}
 		state.wtng_reader -= 1;
 		state.actv_reader += 1;
-//		//println!("a_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		Ok(RwLockReadGuard{ lock: &self })	
 	}
 
@@ -92,16 +86,11 @@ impl<T> RwLock<T> {
 	// * if `order == Order::Lifo`, wakes up the last thread
 	// 
 	// Always returns Ok(_).
-	//pub fn write(&self, cnt: &usize) -> Result<RwLockWriteGuard<T>, ()> {
 	pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
 		let mut state = self.state.lock().unwrap();
-//		//println!("a_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		state.wtng_writer += 1;
-//		let vec = unsafe{ &mut *self.writer_log.get() }; vec.push(*cnt);
 		let vec = unsafe{ &mut *self.writer.get() };
 		vec.push(Condvar::new());
-		//println!("\tIncoming Thread: {:?} {:?}", cnt, vec.len());
-		//println!("\t\t\ta_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		{ 	let refe = &vec[vec.len()-1];
 			if state.wtng_writer != 1 {
 				state = refe.wait(state).unwrap();
@@ -110,9 +99,7 @@ impl<T> RwLock<T> {
 				Preference::Reader 	=> {
 					while (state.actv_writer + state.actv_reader + state.wtng_reader) > 0{
 						state = refe.wait(state).unwrap();
-						//println!("\t\tWriter Choosen: a_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 					}
-					//println!("\tI got here. Ready to hand out writing permition.");
 				},
 				Preference::Writer 	=> {
 					while (state.actv_writer + state.actv_reader) > 0{
@@ -126,7 +113,6 @@ impl<T> RwLock<T> {
 		}
 		state.wtng_writer -= 1;
 		state.actv_writer += 1;
-//		//println!("a_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		Ok(RwLockWriteGuard{ lock: &self })
 	}
 
@@ -134,7 +120,6 @@ impl<T> RwLock<T> {
 		let vec = unsafe{ &mut *self.writer.get() };
 		match self.order{
 			Order::Fifo	=>{
-				//println!("\tI got here. Picking writer.");
 				vec[0].notify_all();
 			},
 			Order::Lifo	=>{
@@ -162,9 +147,7 @@ impl<'a, T> Drop for RwLockReadGuard<'a, T> {
 	fn drop(&mut self){
 		let mut state = self.lock.state.lock().unwrap();
 		state.actv_reader -= 1;
-		//println!("Dropping: a_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		if state.wtng_writer > 0 {
-			//println!("\t\ta_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 			self.lock.pick_writer();
 		}
 	}
@@ -175,7 +158,6 @@ impl<'a, T> Drop for RwLockWriteGuard<'a, T> {
 	fn drop(&mut self){
 		let mut state = self.lock.state.lock().unwrap();
 		state.actv_writer -= 1;
-		//println!("Dropping: a_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
 		match self.lock.pref {
 			Preference::Reader 	=>{
 				if state.wtng_reader > 0 {
