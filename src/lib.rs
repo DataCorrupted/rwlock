@@ -16,7 +16,6 @@ pub struct RwLock<T> {
 	state: Mutex<State>,
 	reader: Condvar,
 	writer: UnsafeCell<Vec<Condvar>>,
-//	head: UnsafeCell<usize>,
 //	writer_log: UnsafeCell<Vec<usize>>,
 }
 
@@ -55,7 +54,7 @@ impl<T> RwLock<T> {
 			}),
 			reader: Condvar::new(),
 			writer: UnsafeCell::new(Vec::new()), 
-//			head: UnsafeCell::new(0), writer_log: UnsafeCell::new(Vec::new()),
+//			writer_log: UnsafeCell::new(Vec::new()),
 		}
 	}
 
@@ -63,6 +62,7 @@ impl<T> RwLock<T> {
 	// 
 	// Always returns Ok(_).
 	// (We declare this return type to be `Result` to be compatible with `std::sync::RwLock`)
+	//pub fn read(&self, cnt: &usize) -> Result<RwLockReadGuard<T>, ()> {
 	pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
 		let mut state = self.state.lock().unwrap();
 		state.wtng_reader += 1;
@@ -92,6 +92,7 @@ impl<T> RwLock<T> {
 	// * if `order == Order::Lifo`, wakes up the last thread
 	// 
 	// Always returns Ok(_).
+	//pub fn write(&self, cnt: &usize) -> Result<RwLockWriteGuard<T>, ()> {
 	pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
 		let mut state = self.state.lock().unwrap();
 //		//println!("a_r: {} a_w: {} w_r: {} w_w:{}", state.actv_reader, state.actv_writer, state.wtng_reader, state.wtng_writer);
@@ -120,7 +121,6 @@ impl<T> RwLock<T> {
 				},
 		}}
 		match self.order{
-			//Order::Fifo	=> { unsafe{ *self.head.get() += 1 };},
 			Order::Fifo	=> { vec.remove(0); },
 			Order::Lifo	=> { vec.pop(); },
 		}
@@ -134,7 +134,6 @@ impl<T> RwLock<T> {
 		let vec = unsafe{ &mut *self.writer.get() };
 		match self.order{
 			Order::Fifo	=>{
-				//vec[unsafe{ *self.head.get() }].notify_one();
 				//println!("\tI got here. Picking writer.");
 				vec[0].notify_all();
 			},
