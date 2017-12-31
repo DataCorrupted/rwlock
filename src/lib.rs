@@ -147,8 +147,21 @@ impl<'a, T> Drop for RwLockReadGuard<'a, T> {
 	fn drop(&mut self){
 		let mut state = self.lock.state.lock().unwrap();
 		state.actv_reader -= 1;
-		if state.wtng_writer > 0 {
-			self.lock.pick_writer();
+		match self.lock.pref {
+			Preference::Reader 	=>{
+				if state.wtng_reader > 0 {
+					self.lock.reader.notify_all();
+				} else if state.wtng_writer > 0 {
+					self.lock.pick_writer();
+				}
+			},
+			Preference::Writer 	=>{
+				if state.wtng_writer > 0 {
+					self.lock.pick_writer();
+				} else if state.wtng_reader > 0 {
+					self.lock.reader.notify_all();
+				}
+			},
 		}
 	}
 }
